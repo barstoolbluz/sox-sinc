@@ -71,6 +71,11 @@ if [ -f configure.ac ] && [ ! -f configure ]; then
     autoreconf -i
 fi
 
+# Ensure configure is executable
+if [ -f configure ]; then
+    chmod +x configure
+fi
+
 # Configure with renamed binaries
 ./configure \
     --prefix="$out" \
@@ -107,6 +112,9 @@ fi
 
 # Regenerate configure and Makefile.in
 autoreconf -i
+
+# Ensure regenerated configure is executable
+chmod +x configure
 
 # Reconfigure after the changes
 ./configure \
