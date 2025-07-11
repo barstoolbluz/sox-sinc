@@ -41,18 +41,15 @@ git.pkg-path = "git"
 sox.pkg-path = "sox"
 
 [vars]
-# Ensure consistent build environment
 LC_ALL = "C"
 LANG = "C"
 
 [hook]
 on-activate = '''
 setup_build_env() {
-    # Cache directory for persistent data
     export SOX_BUILD_CACHE="$FLOX_ENV_CACHE/build"
     mkdir -p "$SOX_BUILD_CACHE"
     
-    # Return to project directory at end
     cd "$FLOX_ENV_PROJECT"
 }
 
@@ -66,9 +63,42 @@ command = '''
 # Clean any previous build artifacts
 make clean 2>/dev/null || true
 
+# Remove configure to force regeneration with proper macros
+rm -f configure
+
+# Copy required autoconf-archive macros to m4 directory if not already present
+if [ -d m4 ] && [ -w m4 ]; then
+    if [ ! -f m4/ax_append_compile_flags.m4 ] && [ -f "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" ]; then
+        cp "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_append_flag.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_check_compile_flag.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_require_defined.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_append_link_flags.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_check_link_flag.m4" m4/
+    fi
+elif [ ! -d m4 ]; then
+    mkdir -p m4
+    if [ -f "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" ]; then
+        cp "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_append_flag.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_check_compile_flag.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_require_defined.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_append_link_flags.m4" m4/
+        cp "$FLOX_ENV/share/aclocal/ax_check_link_flag.m4" m4/
+    fi
+fi
+
 # Run autoreconf if building from git
 if [ -f configure.ac ] && [ ! -f configure ]; then
-    autoreconf -i
+    # Ensure autoconf can find the macros
+    export ACLOCAL_PATH="$FLOX_ENV/share/aclocal:${ACLOCAL_PATH:-}"
+    autoreconf -i -I m4
+elif [ -f configure ]; then
+    # If configure exists but might be missing macros, regenerate it
+    if grep -q "AX_APPEND_COMPILE_FLAGS" configure 2>/dev/null; then
+        export ACLOCAL_PATH="$FLOX_ENV/share/aclocal:${ACLOCAL_PATH:-}"
+        autoreconf -fi -I m4
+    fi
 fi
 
 # Ensure configure is executable
@@ -111,7 +141,18 @@ if [ -f sox.pc.in ]; then
 fi
 
 # Regenerate configure and Makefile.in
-autoreconf -i
+# Copy required autoconf-archive macros if not already present
+if [ ! -f m4/ax_append_compile_flags.m4 ] && [ -f "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" ]; then
+    cp "$FLOX_ENV/share/aclocal/ax_append_compile_flags.m4" m4/
+    cp "$FLOX_ENV/share/aclocal/ax_append_flag.m4" m4/
+    cp "$FLOX_ENV/share/aclocal/ax_check_compile_flag.m4" m4/
+    cp "$FLOX_ENV/share/aclocal/ax_require_defined.m4" m4/
+    cp "$FLOX_ENV/share/aclocal/ax_append_link_flags.m4" m4/
+    cp "$FLOX_ENV/share/aclocal/ax_check_link_flag.m4" m4/
+fi
+
+export ACLOCAL_PATH="$FLOX_ENV/share/aclocal:${ACLOCAL_PATH:-}"
+autoreconf -i -I m4
 
 # Ensure regenerated configure is executable
 chmod +x configure
