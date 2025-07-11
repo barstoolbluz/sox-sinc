@@ -1,0 +1,146 @@
+# Flox manifest version managed by Flox CLI
+version = 1
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+
+[install]
+# Build tools
+autoconf.pkg-path = "autoconf"
+automake.pkg-path = "automake"
+autoconf-archive.pkg-path = "autoconf-archive"
+libtool.pkg-path = "libtool"
+pkg-config.pkg-path = "pkg-config"
+gcc.pkg-path = "gcc"
+gcc.systems = ["x86_64-linux", "aarch64-linux"]
+clang.pkg-path = "clang"
+clang.systems = ["x86_64-darwin", "aarch64-darwin"]
+
+# Optional libraries for audio format support
+flac.pkg-path = "flac"
+libid3tag.pkg-path = "libid3tag"
+libmad.pkg-path = "libmad"
+lame.pkg-path = "lame"
+libvorbis.pkg-path = "libvorbis"
+libogg.pkg-path = "libogg"
+opus.pkg-path = "libopus"
+libsndfile.pkg-path = "libsndfile"
+wavpack.pkg-path = "wavpack"
+libpng.pkg-path = "libpng"
+libmagic.pkg-path = "file"
+libgsm.pkg-path = "gsm"
+opencore-amr.pkg-path = "opencore-amr"
+twolame.pkg-path = "twolame"
+
+# Build utilities
+sed.pkg-path = "gnused"
+grep.pkg-path = "gnugrep"
+git.pkg-path = "git"
+
+# Add libsoxr for high-quality sample rate conversion
+sox.pkg-path = "sox"
+
+[vars]
+# Ensure consistent build environment
+LC_ALL = "C"
+LANG = "C"
+
+[hook]
+on-activate = '''
+setup_build_env() {
+    # Cache directory for persistent data
+    export SOX_BUILD_CACHE="$FLOX_ENV_CACHE/build"
+    mkdir -p "$SOX_BUILD_CACHE"
+    
+    # Return to project directory at end
+    cd "$FLOX_ENV_PROJECT"
+}
+
+setup_build_env
+'''
+
+[build.sox-sinc]
+description = "Sox with sinc filter improvements"
+version.command = "git describe --tags --always || echo '14.4.3-fir'"
+command = '''
+# Clean any previous build artifacts
+make clean 2>/dev/null || true
+
+# Run autoreconf if building from git
+if [ -f configure.ac ] && [ ! -f configure ]; then
+    autoreconf -i
+fi
+
+# Configure with renamed binaries
+./configure \
+    --prefix="$out" \
+    --program-suffix=-sinc \
+    --disable-dependency-tracking \
+    --with-libltdl=no
+
+# Apply source modifications before building
+# This is where additional source edits will be applied
+
+# Modify the library name in source files before building
+# Update Makefile.am files
+sed -i 's/lib_LTLIBRARIES = libsox\.la/lib_LTLIBRARIES = libsox-sinc.la/g' src/Makefile.am
+sed -i 's/libsox_la/libsox_sinc_la/g' src/Makefile.am
+sed -i 's/libsox\.la/libsox-sinc.la/g' src/Makefile.am
+sed -i 's/libsox\.sym/libsox-sinc.sym/g' src/Makefile.am
+
+# Also update optional-fmts.am which is included by Makefile.am
+sed -i 's/libsox_la/libsox_sinc_la/g' src/optional-fmts.am
+
+# Create the renamed symbol file
+if [ -f src/libsox.sym ]; then
+    cp src/libsox.sym src/libsox-sinc.sym
+fi
+
+# Update configure.ac to produce sox-sinc.pc instead of sox.pc
+sed -i 's/sox\.pc/sox-sinc.pc/g' configure.ac
+
+# Update the pkg-config template
+if [ -f sox.pc.in ]; then
+    sed -i 's/-lsox/-lsox-sinc/g' sox.pc.in
+    mv sox.pc.in sox-sinc.pc.in
+fi
+
+# Regenerate configure and Makefile.in
+autoreconf -i
+
+# Reconfigure after the changes
+./configure \
+    --prefix="$out" \
+    --program-suffix=-sinc \
+    --disable-dependency-tracking \
+    --with-libltdl=no
+
+# Build
+make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+
+# Install
+make install
+
+# Post-install fixes
+cd "$out"
+
+# Update pkg-config file if it wasn't renamed
+if [ -f lib/pkgconfig/sox.pc ]; then
+    sed -i "s/Name: SoX/Name: SoX-Sinc/g" lib/pkgconfig/sox.pc
+    mv lib/pkgconfig/sox.pc lib/pkgconfig/sox-sinc.pc
+fi
+
+# Rename man page for library if needed
+if [ -f share/man/man3/libsox.3 ]; then
+    mv share/man/man3/libsox.3 share/man/man3/libsox-sinc.3
+fi
+
+# Update man pages to reference sox-sinc
+for manfile in share/man/man1/*.1 share/man/man3/*.3 share/man/man7/*.7; do
+    if [ -f "$manfile" ]; then
+        sed -i.bak "s/sox\([^-]\)/sox-sinc\1/g" "$manfile"
+        rm -f "$manfile.bak"
+    fi
+done
+'''
+sandbox = "pure"
